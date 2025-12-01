@@ -1,0 +1,56 @@
+{
+  "name": "multi-windows-tool",
+  "displayName": "Multi-Windows-Tool",
+  "description": "在独立窗口中显示引用查找和调用层级",
+  "version": "1.0.0",
+  "publisher": "DoubleX",
+  "repository": {
+  "type": "git",
+  "url": "https://github.com/DoubleX/multi-windows-tool"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "icon": "media/icon.png",
+  "contributes": {
+    "commands": [
+      {
+        "command": "multiRef.find",
+        "title": "%multiRef.find.title%"
+      },
+      {
+        "command": "multiRef.callHierarchy",
+        "title": "%multiRef.callHierarchy.title%"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "multiRef.find",
+          "group": "navigation@1",
+          "when": "editorHasReferenceProvider"
+        },
+        {
+          "command": "multiRef.callHierarchy",
+          "group": "navigation@2",
+          "when": "editorHasCallHierarchyProvider"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}
