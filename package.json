@@ -2,11 +2,11 @@
   "name": "multi-windows-tool",
   "displayName": "Multi-Windows-Tool",
   "description": "在独立窗口中显示引用查找和调用层级",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "DoubleX",
   "repository": {
   "type": "git",
-  "url": "https://github.com/DoubleX/multi-windows-tool"
+  "url": "https://github.com/DoubleXuan/multi-windows-tool"
   },
   "engines": {
     "vscode": "^1.85.0"
