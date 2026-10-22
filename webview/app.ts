@@ -38,7 +38,8 @@ toolbar.append(back, forward, title,
     button('适应窗口', '缩放并居中显示全部已展开节点', () => fit()),
     button('SVG', '导出当前图像（含节点文字）', () => exportSvg()),
     button('JSON', '导出当前已展开的符号、关系和调用位置', () => exportJson()), search);
-const legend = element('div', 'legend', '左侧：调用者　→　当前函数　→　右侧：被调用者　｜　函数名跳定义 · 行号跳调用点 · ◎ 设为中心 · 拖动空白处平移 · Ctrl/⌘ + 滚轮缩放');
+const legend = element('div', 'legend', '调用者 → 当前函数 → 被调用者');
+legend.title = '函数名跳定义 · 次数查看调用位置 · +/− 展开收起 · ◎ 设为中心 · 拖动空白处平移 · Ctrl/⌘ + 滚轮缩放';
 const status = element('div', 'status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
 const viewport = element('div', 'viewport'); viewport.tabIndex = 0; viewport.setAttribute('aria-label', '调用关系图，可使用方向键平移');
 const world = element('div', 'world');
@@ -60,6 +61,7 @@ let layoutPositions = new Map<string, { x: number; y: number }>();
 let pendingAnchor: { id: string; x: number; y: number; viewX: number; viewY: number } | undefined;
 let savedView = vscode.getState();
 let restoring: SavedView['expanded'] = [];
+let selectedId = 'root';
 
 function persist() {
     if (!model) return;
@@ -93,7 +95,7 @@ setView('graph');
 function updateTransform() { world.style.transform = `translate(${x}px,${y}px) scale(${scale})`; }
 function fit() {
     if (!model || view !== 'graph' || !viewport.clientWidth || !layoutPositions.size) return;
-    scale = Math.min(1.15, Math.max(.12, Math.min((viewport.clientWidth - 48) / bounds.width, (viewport.clientHeight - 48) / bounds.height)));
+    scale = Math.min(1, Math.max(.12, Math.min((viewport.clientWidth - 48) / bounds.width, (viewport.clientHeight - 48) / bounds.height)));
     x = (viewport.clientWidth - bounds.width * scale) / 2; y = (viewport.clientHeight - bounds.height * scale) / 2;
     fitted = true; updateTransform();
 }
@@ -143,10 +145,17 @@ function navigate(location: CodeLocation) { post({ type: 'open', location }); }
 function nodeCard(node: Occurrence, isTree = false): HTMLElement {
     const card = element('article', isTree ? 'tree-card' : 'card'); card.dataset.id = node.id;
     card.classList.toggle('root', node.id === 'root'); card.classList.toggle('recursive', node.recursive);
+    card.classList.toggle('selected', node.id === selectedId);
+    card.title = `${node.symbol.name}\n${node.symbol.detail}:${node.symbol.range.start.line + 1}`;
+    card.addEventListener('click', () => {
+        selectedId = node.id;
+        app.querySelectorAll<HTMLElement>('.card, .tree-card').forEach(item => item.classList.toggle('selected', item.dataset.id === selectedId));
+    });
     const heading = element('div', 'node-heading');
     const name = button(node.symbol.name, `跳转到定义：${node.symbol.name}`, () => navigate({ uri: node.symbol.uri, range: node.symbol.range }), 'symbol');
     const center = button('◎', '以此函数为中心查看关系', () => post({ type: 'reroot', generation, symbolId: node.symbol.id, symbol: node.symbol }), 'reroot');
-    heading.append(name, center);
+    const icon = element('span', 'symbol-icon', 'ƒ'); icon.setAttribute('aria-hidden', 'true');
+    heading.append(icon, name, center);
     const detail = element('div', 'detail', `${node.symbol.detail}:${node.symbol.range.start.line + 1}`); detail.title = detail.textContent || '';
     card.append(heading, detail);
     if (node.relation) {
@@ -154,13 +163,22 @@ function nodeCard(node: Occurrence, isTree = false): HTMLElement {
         const sites = element('details', 'sites');
         // Expansion state is restored across redraws.
         sites.open = openSites.has(node.id);
+        const sizeTreeSites = () => {
+            if (isTree) card.style.paddingBottom = sites.open ? `${Math.min(120, relation.sites.length * 17 + 4)}px` : '0';
+        };
+        sizeTreeSites();
         sites.addEventListener('toggle', () => {
             if (!sites.isConnected) return;
             const changed = openSites.has(node.id) !== sites.open;
             if (sites.open) openSites.add(node.id); else openSites.delete(node.id);
+            sizeTreeSites();
             if (changed) { persist(); if (!isTree) { rememberAnchor(node.id); void render(); } }
         });
-        sites.append(element('summary', '', `${relation.sites.length} 个调用位置${node.direction === 'outgoing' ? '（在上级函数中）' : ''}`));
+        card.classList.add('has-sites');
+        const summary = element('summary', '', `×${relation.sites.length}`);
+        summary.title = `${relation.sites.length} 个调用位置${node.direction === 'outgoing' ? '（在上级函数中）' : ''}，点击查看`;
+        summary.setAttribute('aria-label', summary.title);
+        sites.append(summary);
         const list = element('div', 'site-list');
         relation.sites.forEach(site => {
             const label = `${site.uri.split('/').pop() || ''}:${site.range.start.line + 1}:${site.range.start.character + 1}`;
@@ -169,7 +187,10 @@ function nodeCard(node: Occurrence, isTree = false): HTMLElement {
         if (!relation.sites.length) list.append(element('span', 'detail', '语言服务未提供调用位置'));
         sites.append(list); card.append(sites);
     }
-    if (node.recursive) card.append(element('div', 'recursion', '↩ 递归 / 当前路径已出现，停止展开'));
+    if (node.recursive) {
+        const recursion = element('span', 'recursion', '↩ 递归'); recursion.title = '当前路径已出现，停止展开';
+        heading.append(recursion);
+    }
     else {
         const controls = element('div', 'node-controls');
         // Each side is an exploration tree; reverse-direction exploration uses re-center.
@@ -178,17 +199,22 @@ function nodeCard(node: Occurrence, isTree = false): HTMLElement {
             const state = node[direction];
             const label = direction === 'incoming' ? '调用者' : '被调用者';
             const text = state.state === 'loading' ? `${label} 查询中…` : state.state === 'error' ? `${label} 重试` : `${state.expanded ? '−' : '+'} ${label}${state.state === 'loaded' ? ` (${state.children.length})` : ''}`;
-            const control = button(text, state.error || `${state.expanded ? '收起' : '展开'}${label}`, () => toggle(node.id, direction));
+            card.classList.add(`has-${direction}`);
+            const glyph = state.state === 'loading' ? '…' : state.state === 'error' ? '!' : state.expanded ? '−' : '+';
+            const control = button(glyph, state.error || `${state.expanded ? '收起' : '展开'}${label}${state.state === 'loaded' ? ` (${state.children.length})` : ''}`, () => toggle(node.id, direction), `expand expand-${direction}`);
+            control.setAttribute('aria-label', text);
             control.disabled = stale || state.state === 'loading'; controls.append(control);
             if (state.expanded && state.children.length > state.visibleCount) {
-                const more = button(`再显示 ${Math.min(20, state.children.length - state.visibleCount)} 个${label}`, '分批显示更多关系，避免大图一次渲染过多节点', () => {
+                const moreLabel = `再显示 ${Math.min(20, state.children.length - state.visibleCount)} 个${label}`;
+                const more = button('···', moreLabel, () => {
                     if (!model || model.visible().length >= 400) { status.textContent = '请先收起部分分支，或以某个函数为中心继续查看。'; return; }
                     rememberAnchor(node.id); model.showMore(node.id, direction); void render();
-                });
+                }, `more more-${direction}`);
+                more.setAttribute('aria-label', moreLabel);
                 more.disabled = stale; controls.append(more);
             }
             if (state.state === 'error') card.append(element('div', 'error', state.error));
-            if (state.expanded && state.state === 'loaded' && !state.children.length) card.append(element('div', 'empty', `语言服务未返回${label}`));
+            if (state.state === 'loaded' && !state.children.length) { control.textContent = '·'; control.title = `语言服务未返回${label}`; }
         }
         card.append(controls);
     }
@@ -202,14 +228,17 @@ const openSites = new Set<string>();
 function renderTree() {
     tree.replaceChildren();
     if (!model) return;
-    const append = (id: string, parent: HTMLElement) => {
+    const header = element('div', 'outline-header');
+    header.append(element('span', '', '名称'), element('span', '', '调用位置'), element('span', '', '文件'));
+    tree.append(header);
+    const append = (id: string, parent: HTMLElement, depth = 0) => {
         const node = model!.occurrences.get(id)!;
-        const item = element('div', 'tree-item'); item.append(nodeCard(node, true)); parent.append(item);
+        const item = element('div', 'tree-item'); item.style.setProperty('--depth', String(depth)); item.append(nodeCard(node, true)); parent.append(item);
         for (const direction of ['incoming', 'outgoing'] as Direction[]) {
             if (!node[direction].expanded || !node[direction].children.length) continue;
             const children = element('div', 'tree-children');
             children.append(element('div', 'branch-label', direction === 'incoming' ? '← 调用者' : '→ 被调用者'));
-            node[direction].children.slice(0, node[direction].visibleCount).forEach(child => append(child, children)); item.append(children);
+            node[direction].children.slice(0, node[direction].visibleCount).forEach(child => append(child, children, depth + 1)); item.append(children);
         }
     };
     append('root', tree);
@@ -234,8 +263,8 @@ async function render() {
         const edges: ElkExtendedEdge[] = children.filter(node => node.parent && ids.has(node.parent)).map(node => ({ id: `edge:${node.id}`, sources: [node.parent!], targets: [node.id] }));
         return elk.layout({ id: direction, layoutOptions: {
             'elk.algorithm': 'layered', 'elk.direction': direction === 'incoming' ? 'LEFT' : 'RIGHT',
-            'elk.edgeRouting': 'ORTHOGONAL', 'elk.spacing.nodeNode': '24',
-            'elk.layered.spacing.nodeNodeBetweenLayers': '90',
+            'elk.edgeRouting': 'ORTHOGONAL', 'elk.spacing.nodeNode': '10',
+            'elk.layered.spacing.nodeNodeBetweenLayers': '44',
             'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES'
         }, children: children.map(node => ({ id: node.id, ...sizes.get(node.id)! })), edges });
     };
@@ -311,6 +340,7 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
     const message = event.data;
     if (!message || typeof message.type !== 'string') return;
     if (message.type === 'root') {
+        selectedId = 'root';
         generation = message.generation; stale = false; model = new GraphModel(message.symbol); follow = message.follow;
         back.disabled = !message.canBack; forward.disabled = !message.canForward;
         title.textContent = message.symbol.name; title.title = message.symbol.detail;
@@ -360,7 +390,7 @@ function exportSvg() {
     const styledClone = (source: Element): Element => {
         const clone = source.cloneNode(false) as HTMLElement | SVGElement;
         const computed = getComputedStyle(source);
-        const properties = ['color', 'background-color', 'font-family', 'font-size', 'font-weight', 'line-height', 'display', 'align-items', 'justify-content', 'flex', 'flex-shrink', 'flex-wrap', 'gap', 'padding', 'margin', 'border', 'border-radius', 'width', 'max-width', 'min-width', 'height', 'max-height', 'overflow', 'overflow-wrap', 'white-space', 'text-align', 'text-overflow', 'fill', 'stroke', 'stroke-width'];
+        const properties = ['color', 'background-color', 'font-family', 'font-size', 'font-weight', 'line-height', 'display', 'align-items', 'justify-content', 'flex', 'flex-shrink', 'flex-wrap', 'gap', 'padding', 'margin', 'border', 'border-radius', 'width', 'max-width', 'min-width', 'height', 'max-height', 'overflow', 'overflow-wrap', 'white-space', 'text-align', 'text-overflow', 'fill', 'stroke', 'stroke-width', 'position', 'left', 'right', 'top', 'bottom', 'box-sizing', 'list-style', 'opacity'];
         properties.forEach(property => clone.style.setProperty(property, computed.getPropertyValue(property)));
         source.childNodes.forEach(child => clone.append(child instanceof Element ? styledClone(child) : child.cloneNode(true)));
         return clone;
@@ -372,7 +402,7 @@ function exportSvg() {
         const foreign = svgElement('foreignObject');
         foreign.setAttribute('x', String(point.x)); foreign.setAttribute('y', String(point.y)); foreign.setAttribute('width', String(card.offsetWidth)); foreign.setAttribute('height', String(card.offsetHeight));
         const copy = styledClone(card) as HTMLElement;
-        copy.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml'); copy.style.position = 'static';
+        copy.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml'); copy.style.position = 'relative'; copy.style.left = copy.style.top = '0';
         foreign.append(copy); output.append(foreign);
     }
     post({ type: 'export', format: 'svg', content: new XMLSerializer().serializeToString(output) });

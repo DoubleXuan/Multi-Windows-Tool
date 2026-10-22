@@ -68,7 +68,8 @@ test('collapse removes visible edges and re-expansion uses cached children; list
     await page.getByRole('button', { name: '关系图', exact: true }).click();
     await expect(page.locator('.card')).toHaveCount(3); await expect(page.locator('svg .edge')).toHaveCount(2);
     const height = await page.locator('.card[data-id="root/incoming/0/incoming/0"]').evaluate(card => card.offsetHeight);
-    expect(height).toBeGreaterThan(50);
+    expect(height).toBeGreaterThanOrEqual(20);
+    expect(height).toBeLessThanOrEqual(26);
 });
 
 test('recursion stops expansion, obsolete generations are ignored, and errors offer retry', async ({ page }) => {
@@ -157,4 +158,33 @@ test('expansion preserves the clicked node position and paginates a high-degree 
     await page.getByRole('button', { name: '列表', exact: true }).click();
     await page.locator('.tree-card[data-id="root/incoming/0"]').getByRole('button', { name: '再显示 5 个调用者', exact: true }).click();
     await expect(page.locator('.tree-card')).toHaveCount(27);
+});
+
+test('Source Insight style nodes fit their text and outline rows stay compact with aligned file columns', async ({ page }) => {
+    await root(page);
+    await reply(page, 'incoming', [relation('caller'), relation('long', 'incoming', 'a_very_long_function_name_'.repeat(12))]);
+    await reply(page, 'outgoing', [relation('callee', 'outgoing')]);
+    await expect(page.locator('svg .edge')).toHaveCount(3);
+    const short = await page.locator('.card[data-id="root/incoming/0"]').boundingBox();
+    const long = await page.locator('.card[data-id="root/incoming/1"]').boundingBox();
+    expect(short.height).toBeLessThanOrEqual(26); expect(short.width).toBeLessThan(180);
+    expect(long.width).toBeGreaterThan(short.width); expect(long.width).toBeLessThanOrEqual(350);
+    expect(long.height).toBeLessThanOrEqual(26);
+    const card = page.locator('.card[data-id="root/incoming/0"]');
+    await expect(card.locator('.detail')).toBeHidden();
+    await card.locator('summary').click();
+    await expect(card.getByRole('button', { name: 'caller.cpp:9:3', exact: true })).toBeVisible();
+    await card.locator('summary').click();
+    await page.getByRole('button', { name: '列表', exact: true }).click();
+    const dimensions = await page.locator('.tree-card').evaluateAll(rows => rows.map(row => ({ height: row.getBoundingClientRect().height, fileX: row.querySelector('.detail').getBoundingClientRect().left, border: getComputedStyle(row).borderTopWidth })));
+    dimensions.forEach(row => { expect(row.height).toBe(22); expect(row.border).toBe('0px'); expect(row.fileX).toBe(dimensions[0].fileX); });
+    const outlineCaller = page.locator('.tree-card[data-id="root/incoming/0"]');
+    await outlineCaller.locator('summary').click();
+    const site = await outlineCaller.getByRole('button', { name: 'caller.cpp:9:3', exact: true }).boundingBox();
+    const following = await page.locator('.tree-card[data-id="root/incoming/1"]').boundingBox();
+    expect(following.y).toBeGreaterThanOrEqual(site.y + site.height);
+    await page.screenshot({ path: 'test-results/compact-outline.png' });
+    await page.getByRole('button', { name: '关系图', exact: true }).click();
+    await page.getByRole('button', { name: '适应窗口', exact: true }).click();
+    await page.screenshot({ path: 'test-results/compact-graph.png' });
 });

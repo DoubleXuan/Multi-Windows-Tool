@@ -2,7 +2,7 @@
   "name": "multi-windows-tool",
   "displayName": "Multi-Windows-Tool",
   "description": "交互式双向代码调用关系查看器，支持跟随、锁定与调用点导航",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "DoubleX",
   "repository": {
     "type": "git",
