@@ -1,4 +1,6 @@
 {
-    "multiRef.find.title": "Find References (New Window)",
-    "multiRef.callHierarchy.title": "Show Call Hierarchy (New Window)"
+  "multiRef.find.title": "Find References (New Window)",
+  "multiRef.callHierarchy.title": "Show Call Hierarchy (New Window)",
+  "multiRef.open.title": "Open Call Relationship Viewer",
+  "multiRef.restore.title": "Restore Last Call Relationship"
 }

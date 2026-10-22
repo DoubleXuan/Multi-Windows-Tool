@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
 
 # Compiled output
@@ -15,8 +14,10 @@ dist/
 .env.*.local
 
 # IDE & Editor
-.vscode/
+.vscode/*
 !.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo
@@ -32,6 +33,8 @@ Thumbs.db
 # Testing
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
 
 # Publishing
 *.vsix

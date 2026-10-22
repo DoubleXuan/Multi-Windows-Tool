@@ -1,96 +1,112 @@
-**Project**
+# Multi-Windows-Tool
 
-- **Name**: `Multi-Windows-Tool`
-- **Description**: 在独立窗口中显示引用查找和调用层级，支持树形视图和图形化展示。
-- **Version**: `1.1.0`
-- **Publisher**: `DoubleX`
-- **Repository**: https://github.com/DoubleXuan/multi-windows-tool
+VS Code 中的交互式代码调用关系查看器，提供类似 Source Insight Relation Window 的逐层阅读体验。版本：2.0.0。
 
-**Features**
-
-- **引用查找（独立窗口）**: 在旁侧打开独立 Webview 窗口，按文件分组显示所有引用，支持一键跳转到代码位置。
-- **调用层级（独立窗口）**: 展示函数/方法的调用入链，支持展开子节点并跳转到定义。
-  - **树形视图**: 分层展示调用关系，清晰查看调用链。
-  - **新增：关系图视图**: 使用 vis-network 库提供图形化展示，支持交互式探索调用关系。
-  - **智能行号标注**: 图中显示多次调用情况下的所有调用行号。
-- **双视图切换**: 工具栏内可快速切换树形列表与关系图两种查看模式。
-- **UI 优化**: 针对长行使用 flex + ellipsis 优化显示，保留语法与图标样式。
-
-**Commands**
-
-- **`multiRef.find`**: 查找引用并在侧边独立窗口显示（标题: `查找所有引用 (独立窗口)`）。
-- **`multiRef.callHierarchy`**: 显示调用层级并在侧边独立窗口显示（标题: `显示调用层级结构 (独立窗口)`）。
-
-**Quick Start**
-
-- **安装依赖**: 在扩展根目录运行:
+```text
+调用者                  当前函数                  被调用者
+main ────────────────→ processData ─────────────→ validate
+                           └───────────────────→ save
 ```
-npm install
+
+## 功能
+
+- 双向调用关系：中心函数左侧显示调用者，右侧显示被调用者；箭头始终表示“调用者 → 被调用者”。
+- 按需展开：每个分支独立展开、收起，重复展开复用查询缓存；默认每批展示 20 个关系。
+- 精确导航：函数名跳转定义；展开“调用位置”后可跳转每个调用点，包括同一行不同列的位置。
+- 图形 / 列表同步切换，支持平移、缩放和适应窗口。
+- 默认锁定根节点，可切换为防抖跟随编辑器光标；从图中导航不会立即换根。
+- 浏览前进 / 后退，点击节点的 `◎` 将其设为新中心。
+- 搜索已展开函数或文件路径，Enter 定位首个匹配节点。
+- 递归检测：同一条路径再次出现相同函数时停止展开；共享函数可分别出现在多个分支。
+- 代码修改后提示关系可能过期，并拒绝旧请求的结果；点击刷新重新分析。
+- 导出当前可见图为 SVG 或结构化 JSON。SVG 使用 foreignObject 保存节点文字，建议在浏览器中查看。
+- VS Code 恢复已有关系面板时，重新查询并恢复匹配的展开路径及视图模式；单独的恢复命令可重新打开上次根符号。
+- 保留按文件分组的引用查找，文件分组可折叠，引用可精确跳转。
+
+## 使用
+
+需要 VS Code 1.85 或以上版本，并安装目标语言对应的语言扩展。
+
+1. 将光标放在函数名上。
+2. 右键选择“显示调用层级结构 (独立窗口)”，或从命令面板执行“打开调用关系查看器”。
+3. 点击“调用者 / 被调用者”展开分支；分支内继续沿原方向探索，反向查看可先将节点设为中心。
+4. 点击“已锁定”切换为跟随光标。点击“当前符号”手动切换根节点。
+
+“独立窗口”是 VS Code 内部的 Webview 编辑器面板，可以拖动到需要的位置。重复执行打开命令可创建多个面板。
+
+| 命令 | 作用 |
+| --- | --- |
+| `multiRef.open` | 打开调用关系查看器 |
+| `multiRef.callHierarchy` | 从光标符号打开查看器，兼容原有命令 |
+| `multiRef.restore` | 恢复工作区中上次浏览的根符号和跟随模式 |
+| `multiRef.find` | 按文件分组查找引用 |
+
+配置项：
+
+```json
+{
+  "multiRef.followEditor": false,
+  "multiRef.followDelay": 350
+}
 ```
-- **编译 TypeScript**:
-```
+
+跟随模式在每个面板内独立切换，配置项用于新面板的默认值。跟随延迟范围为 150–2000 毫秒。
+
+## 分析能力与边界
+
+扩展复用 VS Code 语言服务的 `prepareCallHierarchy`、`provideIncomingCalls`、`provideOutgoingCalls` 和引用查询，不自行扫描或解析源码。支持范围和准确性由语言服务决定；没有查询结果不等同于程序绝对不存在调用。
+
+C/C++ 工程需正确配置 clangd 或所用 C/C++ 语言扩展，包括编译参数、头文件和宏；建议使用工程生成的 `compile_commands.json`。函数指针、虚调用、宏与条件编译的覆盖范围需要在真实项目中检查。本版本没有自建全工程语义索引，也不推断运行时调用链。
+
+节点采用“路径展示”而非全局合并，相同函数可出现在多个分支。每批显示 20 个关系，接近 400 个可见节点时限制继续展开；可收起分支或重新设中心继续探索。JSON 导出当前可见关系，不代表完整项目索引。
+
+文件编辑、创建、删除和重命名会使缓存失效。外部依赖或语言服务的索引状态发生变化后，也可手动刷新。恢复会话时按原 URI 和位置重新解析；大幅修改源码后可能需要重新选择根符号。
+
+## 开发与验证
+
+```sh
+npm ci
 npm run compile
-```
-- **开发调试**: 在 VS Code 中按 `F5` 启动 Extension Development Host 进行调试。
-- **热编译**: 开发时可使用:
-```
 npm run watch
 ```
 
-**How To Use**
+编译会检查扩展和 Webview 的 TypeScript，将前端打包到 `out/webview/`，并复制 ELK 浏览器包及许可证。运行时不加载 CDN 或在线资源。
 
-- **从命令面板**: 打开命令面板 (Cmd+Shift+P / Ctrl+Shift+P)，输入 `Find References (New Window)` 或 `Show Call Hierarchy (New Window)` 运行。
-- **从编辑器右键菜单**: 在支持引用/调用层级的编辑器上下文菜单中，可快速打开独立窗口。
-- **查看模式切换**:
-  - **调用层级**: 点击工具栏的 **树形** 或 **关系图** 按钮切换展示模式。
-  - **引用查找**: 仅提供树形列表视图（关系图按钮隐藏）。
-- **图中导航**: 在关系图视图中，点击节点会跳转到对应代码；点击节点右侧的 `[+]` 展开下层调用者。
+在 VS Code 中按 F5 启动 Extension Development Host。可使用仓库附带的 `.vscode/launch.json` 和编译任务。打开 `test/fixtures/calls.ts`，在 `processData`、`recursive`、`One.same`、`Two.same` 上验证真实 TypeScript 语言服务。
 
-**Development Notes**
+```sh
+npm run test:unit
+npx playwright install chromium
+npm test
+```
 
-- **源码入口**: `src/extension.ts` 实现命令注册、Webview 内容与 VS Code API 调用逻辑。
-- **编译输出**: 编译后入口为 `out/extension.js`，`package.json` 的 `main` 字段已指向该位置。
-- **样式资源**: 扩展使用资源位于 `media/`，包括：
-  - `media/codicon.css`: 图标与基础样式
-  - `media/vis-network.min.js`: 关系图渲染库
-- **关键实现**:
-  - `getHtmlShell()`: 生成 Webview 容器，包含工具栏与双视图切换。
-  - `handleFindReferences()`: 处理引用查找，展示为树形列表。
-  - `handleCallHierarchy()`: 处理调用层级，支持树形视图和图形化视图。
-  - `vis.Network`: 用于绘制交互式调用关系图。
+Linux 环境若缺少浏览器系统库，可运行 `npx playwright install --with-deps chromium`。如使用自定义浏览器缓存路径，安装和测试需设置相同的 `PLAYWRIGHT_BROWSERS_PATH`。
 
-**Localization**
+自动测试包括：
 
-- **默认字符串**: `package.nls.json` 包含可本地化的 UI 文本键与默认值（英语）。
-- **中文翻译**: `package.nls.zh-cn.json` 提供中文翻译，已覆盖命令标题等文本。
+- 数据模型：双向展开、共享符号、递归、失败重试、过期结果、缓存和分页。
+- 语言服务适配：保留原始 provider 对象、调用点去重、同名符号区分、outgoing 调用点归属调用者文件。
+- 扩展宿主模拟：编辑后失效、异步解析顺序、浏览历史及跟随导航抑制。
+- Chromium：加载实际 Webview HTML 与 CSP，使用真实 ELK 布局检查左右关系、跳转、折叠、列表同步、特殊字符、导出和会话恢复。
 
-**Files of Interest**
+浏览器和宿主模拟测试不替代真实 VS Code 语言扩展的集成验证。发布前请按上述样例进行人工检查，并在目标 C/C++ 工程确认索引结果。
 
-- **`package.json`**: 扩展元数据、命令与菜单项定义。
-- **`src/extension.ts`**: 扩展主要实现。
-- **`media/`**: 存放 Webview 静态资源（CSS、icon 等）。
+## 代码结构
 
-**Troubleshooting**
+```text
+src/
+  extension.ts    命令、生命周期及面板恢复注册
+  controller.ts   面板会话、历史、跟随、请求版本及导出
+  provider.ts     VS Code 语言服务适配、符号身份和查询缓存
+  graph.ts        路径展开模型、递归检测和分批可见性
+  protocol.ts     扩展与 Webview 共享的数据类型
+  references.ts   引用查找
+  webview.ts      Webview 安全外壳和代码导航
+webview/
+  app.ts          HTML 节点、SVG 连线、ELK 布局与交互
+  app.css         VS Code 主题适配
+scripts/          编译与开发监听
+test/             单元测试、浏览器测试与语言服务样例
+```
 
-- **未显示命令**: 请确保已编译并在 `Extension Development Host` 启动扩展，且当前文件类型支持引用/调用层级提供者。
-- **Webview 样式异常**: 检查 `media/` 路径下文件是否完整，`localResourceRoots` 配置是否正确。
-- **关系图不显示**: 确保 `media/vis-network.min.js` 已加载；检查浏览器控制台（F12 > Console）是否有报错。
-- **点击图中节点无响应**: 确认节点是否处于可交互状态，或尝试刷新窗口 (Ctrl+R)。
-
-**License**
-
-- **License**: 请参见仓库根目录的 `LICENSE.md`。
-
----
-
-## 更新日志
-
-### v1.1.0 (最新)
-- **新增**: 调用层级支持关系图可视化视图（使用 vis-network）
-- **新增**: 工具栏支持树形 ⇄ 关系图快速切换
-- **新增**: 关系图中显示多次调用情况的所有行号
-- **改进**: 优化节点点击逻辑，区分展开与跳转操作
-- **改进**: 增强图形化交互体验（拖拽、缩放、导航）
-
-### v1.0.0
-- 初始版本：支持引用查找和调用层级的独立窗口展示
+使用 MIT 许可证。ELK.js 等第三方资源说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

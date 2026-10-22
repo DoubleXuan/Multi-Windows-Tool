@@ -6,3 +6,11 @@ vsc-extension-quickstart.md
 tsconfig.json
 **/*.map
 node_modules/**
+webview/**
+scripts/**
+test/**
+test-results/**
+playwright-report/**
+playwright.config.cjs
+tsconfig.webview.json
+package-lock.json

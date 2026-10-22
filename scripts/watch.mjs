@@ -1,0 +1,14 @@
+import { spawn } from 'node:child_process';
+import { watch } from 'node:fs';
+import { context } from 'esbuild';
+import { mkdir, copyFile } from 'node:fs/promises';
+await mkdir('out/webview', { recursive: true });
+await copyFile('webview/app.css', 'out/webview/app.css');
+await copyFile('node_modules/elkjs/lib/elk.bundled.js', 'out/webview/elk.bundled.js');
+await copyFile('node_modules/elkjs/LICENSE.md', 'out/webview/ELK-LICENSE.md');
+const ctx = await context({ entryPoints: ['webview/app.ts'], outfile: 'out/webview/app.js', bundle: true, platform: 'browser', format: 'iife', target: 'es2020', sourcemap: true });
+await ctx.watch();
+const css = watch('webview/app.css', () => { void copyFile('webview/app.css', 'out/webview/app.css'); });
+const tsc = spawn(process.execPath, ['node_modules/typescript/bin/tsc', '-p', '.', '--watch'], { stdio: 'inherit' });
+const types = spawn(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.webview.json', '--watch'], { stdio: 'inherit' });
+process.on('SIGINT', () => { css.close(); tsc.kill(); types.kill(); void ctx.dispose().then(() => process.exit()); });

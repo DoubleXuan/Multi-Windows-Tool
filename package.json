@@ -1,12 +1,12 @@
 {
   "name": "multi-windows-tool",
   "displayName": "Multi-Windows-Tool",
-  "description": "在独立窗口中显示引用查找和调用层级",
-  "version": "1.1.0",
+  "description": "交互式双向代码调用关系查看器，支持跟随、锁定与调用点导航",
+  "version": "2.0.0",
   "publisher": "DoubleX",
   "repository": {
-  "type": "git",
-  "url": "https://github.com/DoubleXuan/multi-windows-tool"
+    "type": "git",
+    "url": "https://github.com/DoubleXuan/multi-windows-tool"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -14,7 +14,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onWebviewPanel:multiRef.relations"
+  ],
   "main": "./out/extension.js",
   "icon": "media/icon.png",
   "contributes": {
@@ -26,6 +28,14 @@
       {
         "command": "multiRef.callHierarchy",
         "title": "%multiRef.callHierarchy.title%"
+      },
+      {
+        "command": "multiRef.open",
+        "title": "%multiRef.open.title%"
+      },
+      {
+        "command": "multiRef.restore",
+        "title": "%multiRef.restore.title%"
       }
     ],
     "menus": {
@@ -41,16 +51,41 @@
           "when": "editorHasCallHierarchyProvider"
         }
       ]
+    },
+    "configuration": {
+      "title": "Multi-Windows-Tool",
+      "properties": {
+        "multiRef.followEditor": {
+          "type": "boolean",
+          "default": false,
+          "description": "打开关系查看器时自动跟随编辑器光标。可在工具栏切换。"
+        },
+        "multiRef.followDelay": {
+          "type": "number",
+          "default": 350,
+          "minimum": 150,
+          "maximum": 2000,
+          "description": "跟随光标的防抖时间（毫秒）。"
+        }
+      }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "compile": "tsc -p ./ && tsc -p tsconfig.webview.json && node scripts/build.mjs",
+    "watch": "node scripts/watch.mjs",
+    "test": "npm run compile && npm run test:unit && npm run test:ui",
+    "test:unit": "node --test test/*.test.cjs",
+    "test:ui": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "@types/node": "^18.x",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "1.85.0",
+    "esbuild": "^0.25.0",
     "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "elkjs": "^0.10.0"
   }
 }

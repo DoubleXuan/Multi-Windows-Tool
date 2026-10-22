@@ -1,0 +1,47 @@
+:root { --edge-color: var(--vscode-charts-red, #c05454); }
+* { box-sizing: border-box; }
+html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { font: var(--vscode-font-size, 13px) var(--vscode-font-family, sans-serif); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+#app { display: flex; flex-direction: column; }
+[hidden] { display: none !important; }
+button, input { font: inherit; }
+button { color: var(--vscode-foreground); background: var(--vscode-button-secondaryBackground, transparent); border: 1px solid var(--vscode-panel-border, #7775); padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+button:hover { background: var(--vscode-toolbar-hoverBackground); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, summary:focus-visible, input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+button.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); flex-shrink: 0; }
+.title { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: auto; }
+.search { width: 175px; padding: 5px; border: 1px solid var(--vscode-input-border, transparent); background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+.legend, .status { padding: 6px 10px; font-size: 11px; color: var(--vscode-descriptionForeground); flex-shrink: 0; }
+.status { color: var(--vscode-textLink-foreground); white-space: pre-wrap; }
+.status:empty { display: none; }
+.viewport { flex: 1; min-height: 0; overflow: hidden; position: relative; touch-action: none; background-image: radial-gradient(var(--vscode-panel-border, #8884) .8px, transparent .8px); background-size: 18px 18px; }
+.viewport.panning { cursor: grabbing; }
+.world { position: absolute; transform-origin: 0 0; }
+.edges { position: absolute; overflow: visible; pointer-events: none; }
+.edge { stroke: var(--edge-color); stroke-width: 1.5; fill: none; }
+.card { width: 250px; position: absolute; border: 1px solid var(--vscode-panel-border, #888); border-radius: 6px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); padding: 9px; box-shadow: 0 2px 6px #0002; }
+.card.root, .tree-card.root { border: 2px solid var(--vscode-focusBorder, #3985d7); }
+.card.match, .tree-card.match { outline: 3px solid var(--vscode-editor-findMatchHighlightBorder, #dfb146); }
+.measure { position: fixed; left: -10000px; top: 0; visibility: hidden; pointer-events: none; }
+.measure .card { position: relative; }
+.node-heading { display: flex; gap: 4px; align-items: start; }
+.symbol { font-weight: 600; text-align: left; overflow-wrap: anywhere; flex: 1; min-width: 0; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground); }
+.reroot { padding: 0 4px; background: transparent; border: none; flex-shrink: 0; }
+.detail { font-size: 11px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 5px 0; }
+.node-controls { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.node-controls button { font-size: 11px; padding: 3px 5px; }
+.sites { font-size: 11px; margin-top: 5px; }
+summary { cursor: pointer; padding: 3px 0; }
+.site-list { max-height: 120px; overflow: auto; }
+.site { border: none; display: block; background: transparent; color: var(--vscode-textLink-foreground); font-family: var(--vscode-editor-font-family, monospace); padding: 3px 5px; text-align: left; width: 100%; overflow-wrap: anywhere; }
+.recursion, .empty { color: var(--vscode-descriptionForeground); font-size: 11px; margin-top: 5px; }
+.error { color: var(--vscode-errorForeground); font-size: 11px; overflow-wrap: anywhere; margin-top: 5px; }
+.tree { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.tree-card { max-width: 650px; border: 1px solid var(--vscode-panel-border, #888); border-radius: 5px; padding: 8px; margin: 5px 0; }
+.tree-children { border-left: 1px solid var(--vscode-tree-indentGuidesStroke, #777); margin-left: 12px; padding-left: 14px; }
+.branch-label { color: var(--vscode-descriptionForeground); font-size: 11px; margin-top: 8px; }
+.reference-file { margin-bottom: 12px; }
+.reference-file > summary { font-weight: 600; overflow-wrap: anywhere; }
+.reference { display: block; width: 100%; text-align: left; border: none; background: transparent; font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; overflow-wrap: anywhere; padding: 5px 15px; }
