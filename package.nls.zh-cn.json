@@ -1,6 +1,7 @@
 {
   "multiRef.find.title": "查找所有引用 (独立窗口)",
-  "multiRef.callHierarchy.title": "显示调用层级结构 (独立窗口)",
+  "multiRef.callHierarchy.title": "显示调用/引用关系 (独立窗口)",
   "multiRef.open.title": "打开调用关系查看器",
-  "multiRef.restore.title": "恢复上次调用关系"
+  "multiRef.restore.title": "恢复上次调用关系",
+  "multiRef.diagnostics.title": "查看符号关系查询日志"
 }

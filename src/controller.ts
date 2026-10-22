@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import { CallGraphProvider } from './provider';
-import { CodeLocation, HostMessage, SymbolData } from './protocol';
+import { CodeLocation, HostMessage, RelationMode, SymbolData } from './protocol';
+import { Report } from './symbols';
 import { createPanel, openLocation, validLocation } from './webview';
 
 export class RelationshipViewer implements vscode.Disposable {
     private readonly panel: vscode.WebviewPanel;
-    private readonly provider = new CallGraphProvider();
+    private readonly provider: CallGraphProvider;
+    private mode: RelationMode = 'auto';
     private readonly disposables: vscode.Disposable[] = [];
     private generation = 0;
     private resolution = 0;
@@ -21,13 +23,15 @@ export class RelationshipViewer implements vscode.Disposable {
     private anchor?: { uri: vscode.Uri; position: vscode.Position };
     private lastEditor?: vscode.TextEditor;
 
-    constructor(private readonly context: vscode.ExtensionContext, initial?: vscode.TextEditor, existing?: vscode.WebviewPanel, saved?: unknown) {
+    constructor(private readonly context: vscode.ExtensionContext, initial?: vscode.TextEditor, existing?: vscode.WebviewPanel, saved?: unknown, report: Report = () => {}) {
+        this.provider = new CallGraphProvider(report);
         this.lastEditor = initial || vscode.window.activeTextEditor;
         if (initial) this.anchor = { uri: initial.document.uri, position: initial.selection.active };
         else {
-            const session = (saved || context.workspaceState.get('multiRef.lastSession')) as { root?: CodeLocation; follow?: boolean } | undefined;
+            const session = (saved || context.workspaceState.get('multiRef.lastSession')) as { root?: CodeLocation; follow?: boolean; mode?: RelationMode } | undefined;
             if (validLocation(session?.root)) this.anchor = { uri: vscode.Uri.parse(session.root.uri), position: new vscode.Position(session.root.range.start.line, session.root.range.start.character) };
             if (typeof session?.follow === 'boolean') this.follow = session.follow;
+            if (session?.mode && ['auto', 'calls', 'references', 'contains'].includes(session.mode)) this.mode = session.mode;
         }
         this.panel = createPanel(context, '调用关系', existing);
         this.disposables.push(this.panel.webview.onDidReceiveMessage((msg: unknown) => { void this.receive(msg).catch(e => this.status(String(e))); }));
@@ -74,7 +78,7 @@ export class RelationshipViewer implements vscode.Disposable {
             const symbols = await this.provider.prepare(uri, position);
             if (this.disposed || ticket !== this.resolution) return;
             if (!symbols.length) {
-                this.status('此位置没有可用的调用层级。请选中函数，并确认语言扩展已启用且完成索引。');
+                this.status('未能解析光标处符号。请选择符号名称后重试，也可使用“查找所有引用”。');
                 return;
             }
             let symbol = symbols[0];
@@ -103,10 +107,10 @@ export class RelationshipViewer implements vscode.Disposable {
         this.authorize({ uri: symbol.uri, range: symbol.range });
         this.panel.title = `关系: ${symbol.name}`;
         this.persist();
-        this.post({ type: 'root', generation: this.generation, symbol, follow: this.follow, canBack: this.historyIndex > 0, canForward: this.historyIndex < this.history.length - 1 });
+        this.post({ type: 'root', generation: this.generation, symbol, follow: this.follow, mode: this.mode, canBack: this.historyIndex > 0, canForward: this.historyIndex < this.history.length - 1 });
     }
     private persist() {
-        if (this.root) void this.context.workspaceState.update('multiRef.lastSession', { root: { uri: this.root.uri, range: this.root.range }, follow: this.follow });
+        if (this.root) void this.context.workspaceState.update('multiRef.lastSession', { root: this.root.queryLocation || { uri: this.root.uri, range: this.root.range }, follow: this.follow, mode: this.mode });
     }
     private async receive(value: unknown) {
         if (!value || typeof value !== 'object' || this.disposed) return;
@@ -120,13 +124,13 @@ export class RelationshipViewer implements vscode.Disposable {
                 const { generation, requestId, occurrenceId, symbolId, direction } = msg;
                 if (generation !== this.generation || typeof requestId !== 'number' || typeof occurrenceId !== 'string' || typeof symbolId !== 'string' || (direction !== 'incoming' && direction !== 'outgoing')) return;
                 try {
-                    const relations = await this.provider.query(symbolId, direction);
+                    const { relations, notices, supported } = await this.provider.queryResult(symbolId, direction, this.mode);
                     if (generation !== this.generation) return;
                     for (const relation of relations) {
                         this.authorize({ uri: relation.symbol.uri, range: relation.symbol.range });
                         relation.sites.forEach(site => this.authorize(site));
                     }
-                    this.post({ type: 'children', generation, requestId, occurrenceId, direction, relations });
+                    this.post({ type: 'children', generation, requestId, occurrenceId, direction, relations, notices, supported });
                 } catch (error) {
                     if (generation === this.generation) this.post({ type: 'queryError', generation, requestId, occurrenceId, direction, message: String(error) });
                 }
@@ -158,6 +162,16 @@ export class RelationshipViewer implements vscode.Disposable {
                 }
                 break;
             }
+            case 'mode':
+                if (typeof msg.value === 'string' && ['auto', 'calls', 'references', 'contains'].includes(msg.value)) {
+                    this.mode = msg.value as RelationMode;
+                    clearTimeout(this.timer); ++this.resolution;
+                    if (this.root && this.dirty) {
+                        const anchor = this.root.queryLocation || this.root;
+                        await this.resolve(vscode.Uri.parse(anchor.uri), new vscode.Position(anchor.range.start.line, anchor.range.start.character), true, true);
+                    } else if (this.root) this.setRoot(this.root);
+                }
+                break;
             case 'current': {
                 const editor = this.lastEditor;
                 if (editor) await this.resolve(editor.document.uri, editor.selection.active, true);
@@ -166,7 +180,10 @@ export class RelationshipViewer implements vscode.Disposable {
             }
             case 'refresh':
                 this.provider.invalidate();
-                if (this.root) await this.resolve(vscode.Uri.parse(this.root.uri), new vscode.Position(this.root.range.start.line, this.root.range.start.character), true, true);
+                if (this.root) {
+                    const anchor = this.root.queryLocation || this.root;
+                    await this.resolve(vscode.Uri.parse(anchor.uri), new vscode.Position(anchor.range.start.line, anchor.range.start.character), true, true);
+                }
                 else if (this.anchor) await this.resolve(this.anchor.uri, this.anchor.position, true);
                 break;
             case 'reroot': {
@@ -174,7 +191,8 @@ export class RelationshipViewer implements vscode.Disposable {
                 // Re-resolve the definition to get a fresh provider-owned item.
                 const symbol = msg.symbol as SymbolData;
                 if (symbol?.id === msg.symbolId && validLocation(symbol) && this.allowed.has(JSON.stringify({ uri: symbol.uri, range: symbol.range }))) {
-                    await this.resolve(vscode.Uri.parse(symbol.uri), new vscode.Position(symbol.range.start.line, symbol.range.start.character), true);
+                    const anchor = symbol.queryLocation || symbol;
+                    await this.resolve(vscode.Uri.parse(anchor.uri), new vscode.Position(anchor.range.start.line, anchor.range.start.character), true);
                 }
                 break;
             }
@@ -184,7 +202,8 @@ export class RelationshipViewer implements vscode.Disposable {
                     clearTimeout(this.timer); ++this.resolution;
                     this.historyIndex = next;
                     const symbol = this.history[next];
-                    await this.resolve(vscode.Uri.parse(symbol.uri), new vscode.Position(symbol.range.start.line, symbol.range.start.character), true, true);
+                    const anchor = symbol.queryLocation || symbol;
+                    await this.resolve(vscode.Uri.parse(anchor.uri), new vscode.Position(anchor.range.start.line, anchor.range.start.character), true, true);
                 }
                 break;
             }

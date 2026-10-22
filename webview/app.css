@@ -78,3 +78,10 @@ summary { cursor: pointer; }
 .reference-file { margin: 4px 8px 8px; }
 .reference-file > summary { font-weight: 600; line-height: 22px; overflow-wrap: anywhere; }
 .reference { display: block; width: 100%; text-align: left; border: 0; font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 15px; line-height: 20px; }
+.mode-select { font: inherit; color: inherit; background: var(--vscode-dropdown-background, #fff); border: 1px solid var(--vscode-dropdown-border, #999); height: 22px; max-width: 100px; }
+.capability-note { font-size: 11px; padding: 3px 8px; color: var(--vscode-descriptionForeground, #666); border-bottom: 1px solid var(--vscode-panel-border, #8885); }
+.capability-note:empty { display: none; }
+.relation-kind, .query-notice { font-size: 9px; line-height: 12px; flex-shrink: 0; color: var(--vscode-descriptionForeground, #666); }
+.query-notice { color: var(--vscode-editorWarning-foreground, #ad7900); cursor: help; }
+.edge.references, .edge.declaration { stroke-dasharray: 4 3; }
+.edge.contains { stroke-dasharray: 1 3; }

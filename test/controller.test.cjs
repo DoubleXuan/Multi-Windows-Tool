@@ -92,3 +92,26 @@ test('current-symbol action works while Webview has focus, and navigation does n
     assert.equal(preparations, 2);
     viewer.dispose();
 });
+
+test('switching relation modes starts a new generation, persists mode and isolates an old pending expansion', async () => {
+    let finish;
+    const root = item('root', 'root.cpp');
+    const { viewer, posted, saved } = setup(async command => {
+        if (command === 'vscode.prepareCallHierarchy') return [root];
+        if (command === 'vscode.provideOutgoingCalls') return new Promise(resolve => { finish = resolve; });
+        return [];
+    });
+    await viewer.receive({ type: 'ready' });
+    const initial = posted.find(message => message.type === 'root');
+    const pending = viewer.receive({ type: 'expand', generation: initial.generation, requestId: 1, occurrenceId: 'root', symbolId: initial.symbol.id, direction: 'outgoing' });
+    await tick();
+    await viewer.receive({ type: 'mode', value: 'references' });
+    const latest = posted.filter(message => message.type === 'root').at(-1);
+    assert.equal(latest.mode, 'references'); assert.ok(latest.generation > initial.generation);
+    finish([]); await pending;
+    assert.equal(posted.filter(message => message.type === 'children').length, 0);
+    assert.equal(saved.get('multiRef.lastSession').mode, 'references');
+    await viewer.receive({ type: 'expand', generation: latest.generation, requestId: 2, occurrenceId: 'root', symbolId: latest.symbol.id, direction: 'incoming' });
+    assert.equal(posted.filter(message => message.type === 'children').length, 1);
+    viewer.dispose();
+});

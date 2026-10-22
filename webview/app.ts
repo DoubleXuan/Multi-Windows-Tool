@@ -1,11 +1,13 @@
 import { GraphModel, Occurrence } from '../src/graph';
-import { CodeLocation, Direction, HostMessage, SymbolData } from '../src/protocol';
+import { CodeLocation, Direction, HostMessage, RelationKind, RelationMode, SymbolData } from '../src/protocol';
+import { branchLabel, directions } from '../src/relations';
 import type ELKConstructor from 'elkjs/lib/elk-api';
 import type { ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
 
 declare const ELK: typeof ELKConstructor;
 interface SavedView {
     root?: SymbolData; follow: boolean; view: 'graph' | 'tree';
+    mode?: RelationMode;
     expanded: { id: string; symbolId: string; direction: Direction; visibleCount?: number }[];
     openSites: string[];
 }
@@ -30,24 +32,30 @@ const title = element('strong', 'title', '调用关系');
 const followButton = button('已锁定', '切换：锁定根节点 / 跟随编辑器光标', () => post({ type: 'follow', value: !follow }));
 const graphButton = button('关系图', '显示关系图', () => setView('graph'));
 const treeButton = button('列表', '显示调用关系列表', () => setView('tree'));
-const search = element('input', 'search'); search.type = 'search'; search.placeholder = '查找已展开的函数'; search.setAttribute('aria-label', search.placeholder);
+const modeSelect = element('select', 'mode-select'); modeSelect.setAttribute('aria-label', '关系类型');
+for (const [value, label] of [['auto', '自动关系'], ['calls', '仅调用'], ['references', '全部引用'], ['contains', '类型成员']]) {
+    const option = element('option', '', label); option.value = value; modeSelect.append(option);
+}
+modeSelect.addEventListener('change', () => post({ type: 'mode', value: modeSelect.value }));
+const search = element('input', 'search'); search.type = 'search'; search.placeholder = '查找已展开的符号'; search.setAttribute('aria-label', search.placeholder);
 toolbar.append(back, forward, title,
     button('当前符号', '以代码编辑器当前符号为中心', () => post({ type: 'current' })),
     followButton, button('刷新', '清空缓存并重新分析当前根符号', () => post({ type: 'refresh' })),
-    graphButton, treeButton, button('−', '缩小', () => zoomAt(.8)), button('+', '放大', () => zoomAt(1.25)),
+    modeSelect, graphButton, treeButton, button('−', '缩小', () => zoomAt(.8)), button('+', '放大', () => zoomAt(1.25)),
     button('适应窗口', '缩放并居中显示全部已展开节点', () => fit()),
     button('SVG', '导出当前图像（含节点文字）', () => exportSvg()),
     button('JSON', '导出当前已展开的符号、关系和调用位置', () => exportJson()), search);
-const legend = element('div', 'legend', '调用者 → 当前函数 → 被调用者');
+const legend = element('div', 'legend', '实线：调用　虚线：引用　点线：包含；箭头从使用者／容器指向目标符号');
 legend.title = '函数名跳定义 · 次数查看调用位置 · +/− 展开收起 · ◎ 设为中心 · 拖动空白处平移 · Ctrl/⌘ + 滚轮缩放';
 const status = element('div', 'status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+const capabilityNote = element('div', 'capability-note');
 const viewport = element('div', 'viewport'); viewport.tabIndex = 0; viewport.setAttribute('aria-label', '调用关系图，可使用方向键平移');
 const world = element('div', 'world');
 const lines = svgElement('svg'); lines.classList.add('edges');
 const cards = element('div', 'cards');
 world.append(lines, cards); viewport.append(world);
 const tree = element('div', 'tree'); tree.hidden = true;
-app.append(toolbar, legend, status, viewport, tree);
+app.append(toolbar, legend, capabilityNote, status, viewport, tree);
 const measure = element('div', 'measure'); app.append(measure);
 
 let model: GraphModel | undefined;
@@ -62,11 +70,12 @@ let pendingAnchor: { id: string; x: number; y: number; viewX: number; viewY: num
 let savedView = vscode.getState();
 let restoring: SavedView['expanded'] = [];
 let selectedId = 'root';
+let mode: RelationMode = 'auto';
 
 function persist() {
     if (!model) return;
     vscode.setState({
-        root: model.occurrences.get('root')!.symbol, follow, view,
+        root: model.occurrences.get('root')!.symbol, follow, view, mode,
         expanded: [...model.occurrences.values()].flatMap(node => (['incoming', 'outgoing'] as Direction[]).filter(direction => node[direction].expanded).map(direction => ({ id: node.id, symbolId: node.symbol.id, direction, visibleCount: node[direction].visibleCount }))),
         openSites: [...openSites]
     });
@@ -77,7 +86,7 @@ function resumeBranches() {
     for (const saved of restoring) {
         const node = model.occurrences.get(saved.id);
         if (!node) { remaining.push(saved); continue; }
-        if (node.symbol.id !== saved.symbolId || node.recursive) continue;
+        if (node.symbol.id !== saved.symbolId || node.recursive || !directions(node.symbol, mode).includes(saved.direction)) continue;
         node[saved.direction].visibleCount = Math.min(400, Math.max(20, saved.visibleCount || 20));
         const requestId = model.begin(saved.id, saved.direction);
         if (requestId !== undefined) post({ type: 'expand', generation, requestId, occurrenceId: saved.id, symbolId: saved.symbolId, direction: saved.direction });
@@ -153,11 +162,18 @@ function nodeCard(node: Occurrence, isTree = false): HTMLElement {
     });
     const heading = element('div', 'node-heading');
     const name = button(node.symbol.name, `跳转到定义：${node.symbol.name}`, () => navigate({ uri: node.symbol.uri, range: node.symbol.range }), 'symbol');
-    const center = button('◎', '以此函数为中心查看关系', () => post({ type: 'reroot', generation, symbolId: node.symbol.id, symbol: node.symbol }), 'reroot');
-    const icon = element('span', 'symbol-icon', 'ƒ'); icon.setAttribute('aria-hidden', 'true');
+    const center = button('◎', '以此符号为中心查看关系', () => post({ type: 'reroot', generation, symbolId: node.symbol.id, symbol: node.symbol }), 'reroot');
+    center.disabled = node.symbol.category === 'location';
+    const glyphs = { function: 'ƒ', type: 'T', field: 'm', macro: '#', variable: 'v', location: '·', unknown: '?' };
+    const icon = element('span', 'symbol-icon', glyphs[node.symbol.category || 'function']); icon.setAttribute('aria-hidden', 'true');
     heading.append(icon, name, center);
     const detail = element('div', 'detail', `${node.symbol.detail}:${node.symbol.range.start.line + 1}`); detail.title = detail.textContent || '';
     card.append(heading, detail);
+    const labels: Record<RelationKind, string> = { calls: '调用', references: '引用（非已确认调用）', contains: '包含成员', declaration: '声明／定义位置' };
+    if (node.relation && node.relation.kind && node.relation.kind !== 'calls') {
+        const badge = element('span', `relation-kind ${node.relation.kind}`, node.relation.kind === 'references' ? '引' : node.relation.kind === 'contains' ? '属' : '声');
+        badge.title = `${labels[node.relation.kind]} · ${(node.relation.sources || []).join(', ')}`; heading.append(badge);
+    }
     if (node.relation) {
         const relation = node.relation;
         const sites = element('details', 'sites');
@@ -176,7 +192,7 @@ function nodeCard(node: Occurrence, isTree = false): HTMLElement {
         });
         card.classList.add('has-sites');
         const summary = element('summary', '', `×${relation.sites.length}`);
-        summary.title = `${relation.sites.length} 个调用位置${node.direction === 'outgoing' ? '（在上级函数中）' : ''}，点击查看`;
+        summary.title = `${relation.sites.length} 个${relation.kind === 'contains' ? '成员定义' : relation.kind && relation.kind !== 'calls' ? '引用位置' : '调用位置'}${relation.kind === 'calls' && node.direction === 'outgoing' ? '（在上级函数中）' : ''}，点击查看`;
         summary.setAttribute('aria-label', summary.title);
         sites.append(summary);
         const list = element('div', 'site-list');
@@ -184,26 +200,31 @@ function nodeCard(node: Occurrence, isTree = false): HTMLElement {
             const label = `${site.uri.split('/').pop() || ''}:${site.range.start.line + 1}:${site.range.start.character + 1}`;
             const link = button(label, `${decodeUri(site.uri)}，第 ${site.range.start.line + 1} 行`, () => navigate(site), 'site'); list.append(link);
         });
-        if (!relation.sites.length) list.append(element('span', 'detail', '语言服务未提供调用位置'));
+        if (!relation.sites.length) list.append(element('span', 'detail', '语言服务未提供位置'));
         sites.append(list); card.append(sites);
     }
     if (node.recursive) {
-        const recursion = element('span', 'recursion', '↩ 递归'); recursion.title = '当前路径已出现，停止展开';
+        const recursion = element('span', 'recursion', node.relation?.kind && node.relation.kind !== 'calls' ? '↩ 已出现' : '↩ 递归'); recursion.title = '当前路径已出现，停止展开';
         heading.append(recursion);
     }
     else {
         const controls = element('div', 'node-controls');
         // Each side is an exploration tree; reverse-direction exploration uses re-center.
-        const directions: Direction[] = node.direction ? [node.direction] : ['incoming', 'outgoing'];
-        for (const direction of directions) {
+        const available = directions(node.symbol, mode);
+        const selectedDirections = node.direction && available.includes(node.direction) ? [node.direction] : available;
+        for (const direction of selectedDirections) {
             const state = node[direction];
-            const label = direction === 'incoming' ? '调用者' : '被调用者';
+            const label = branchLabel(node.symbol, direction, mode);
             const text = state.state === 'loading' ? `${label} 查询中…` : state.state === 'error' ? `${label} 重试` : `${state.expanded ? '−' : '+'} ${label}${state.state === 'loaded' ? ` (${state.children.length})` : ''}`;
             card.classList.add(`has-${direction}`);
             const glyph = state.state === 'loading' ? '…' : state.state === 'error' ? '!' : state.expanded ? '−' : '+';
             const control = button(glyph, state.error || `${state.expanded ? '收起' : '展开'}${label}${state.state === 'loaded' ? ` (${state.children.length})` : ''}`, () => toggle(node.id, direction), `expand expand-${direction}`);
             control.setAttribute('aria-label', text);
-            control.disabled = stale || state.state === 'loading'; controls.append(control);
+            control.disabled = stale || state.state === 'loading' || !state.supported; controls.append(control);
+            if (state.notices.length) {
+                const warning = element('span', 'query-notice', '!'); warning.title = state.notices.join('\n'); heading.append(warning);
+                control.title += `\n${warning.title}`;
+            }
             if (state.expanded && state.children.length > state.visibleCount) {
                 const moreLabel = `再显示 ${Math.min(20, state.children.length - state.visibleCount)} 个${label}`;
                 const more = button('···', moreLabel, () => {
@@ -229,7 +250,7 @@ function renderTree() {
     tree.replaceChildren();
     if (!model) return;
     const header = element('div', 'outline-header');
-    header.append(element('span', '', '名称'), element('span', '', '调用位置'), element('span', '', '文件'));
+    header.append(element('span', '', '名称'), element('span', '', '位置'), element('span', '', '文件'));
     tree.append(header);
     const append = (id: string, parent: HTMLElement, depth = 0) => {
         const node = model!.occurrences.get(id)!;
@@ -237,7 +258,7 @@ function renderTree() {
         for (const direction of ['incoming', 'outgoing'] as Direction[]) {
             if (!node[direction].expanded || !node[direction].children.length) continue;
             const children = element('div', 'tree-children');
-            children.append(element('div', 'branch-label', direction === 'incoming' ? '← 调用者' : '→ 被调用者'));
+            children.append(element('div', 'branch-label', `${direction === 'incoming' ? '←' : '→'} ${branchLabel(node.symbol, direction, mode)}`));
             node[direction].children.slice(0, node[direction].visibleCount).forEach(child => append(child, children, depth + 1)); item.append(children);
         }
     };
@@ -315,10 +336,13 @@ function drawEdges(layouts: { graph: ElkNode; dx: number; dy: number }[]) {
             const points = [section.startPoint, ...section.bendPoints || [], section.endPoint];
             // Layout edges point away from the root. Call arrows on the left
             // point in the opposite direction: caller -> callee.
-            if (graph.id === 'incoming') points.reverse();
+            const child = model?.occurrences.get(edge.id.slice('edge:'.length));
+            const relation = child?.relation;
+            if (relation ? relation.sourceId === child.symbol.id : graph.id === 'incoming') points.reverse();
             const path = svgElement('path');
             path.setAttribute('d', points.map((point, index) => `${index ? 'L' : 'M'} ${point.x + dx} ${point.y + dy}`).join(' '));
-            path.setAttribute('marker-end', 'url(#arrow)'); path.classList.add('edge'); lines.append(path);
+            path.setAttribute('marker-end', 'url(#arrow)'); path.classList.add('edge', relation?.kind || 'calls');
+            const tooltip = svgElement('title'); tooltip.textContent = relation ? `${relation.kind} · ${(relation.sources || []).join(', ')}` : 'calls'; path.append(tooltip); lines.append(path);
         }
     }
 }
@@ -342,30 +366,35 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
     if (message.type === 'root') {
         selectedId = 'root';
         generation = message.generation; stale = false; model = new GraphModel(message.symbol); follow = message.follow;
+        mode = message.mode || 'auto'; modeSelect.value = mode;
+        capabilityNote.textContent = mode === 'contains' && !message.symbol.capabilities?.contains ? '此符号不是可展开成员的类型，请切换“全部引用”或“自动关系”。'
+            : message.symbol.category === 'macro' ? '左侧查看宏的使用引用；右侧解析宏体符号引用。宏体展开后的实际调用不作推断。'
+            : message.symbol.category === 'field' ? '显示成员的使用引用；函数指针的实际绑定目标不会仅凭同名字段推断。'
+            : mode === 'calls' && message.symbol.capabilities?.calls === false ? '此符号未提供调用层级，可切换“全部引用”查看语言服务返回的位置。' : '';
         back.disabled = !message.canBack; forward.disabled = !message.canForward;
         title.textContent = message.symbol.name; title.title = message.symbol.detail;
         followButton.textContent = follow ? '跟随光标' : '已锁定'; followButton.classList.toggle('active', follow);
         status.textContent = ''; openSites.clear(); fitted = false; pendingAnchor = undefined; layoutPositions.clear();
-        const restore = savedView?.root?.id === message.symbol.id ? savedView : undefined;
+        const restore = savedView?.root?.id === message.symbol.id && (savedView.mode || 'auto') === mode ? savedView : undefined;
         if (restore) {
             restoring = restore.expanded || [];
             (restore.openSites || []).forEach(id => openSites.add(id));
             setView(restore.view || 'graph');
         } else restoring = [];
         savedView = undefined;
-        for (const direction of ['incoming', 'outgoing'] as Direction[]) {
+        for (const direction of directions(message.symbol, mode)) {
             if (!restore || restore.expanded.some(saved => saved.id === 'root' && saved.direction === direction)) toggle('root', direction);
         }
         void render();
     } else if (message.type === 'children' && message.generation === generation && !stale) {
-        if (model?.accept(message.occurrenceId, message.direction, message.requestId, message.relations)) { resumeBranches(); rememberAnchor(message.occurrenceId); void render(); }
+        if (model?.accept(message.occurrenceId, message.direction, message.requestId, message.relations, message.notices, message.supported)) { resumeBranches(); rememberAnchor(message.occurrenceId); void render(); }
     } else if (message.type === 'queryError' && message.generation === generation && !stale) {
         if (model?.fail(message.occurrenceId, message.direction, message.requestId, message.message)) { rememberAnchor(message.occurrenceId); void render(); }
     } else if (message.type === 'status') status.textContent = message.message;
     else if (message.type === 'follow') { follow = message.value; followButton.textContent = follow ? '跟随光标' : '已锁定'; followButton.classList.toggle('active', follow); persist(); }
     else if (message.type === 'invalidate') { stale = true; generation = message.generation; void render(); }
     else if (message.type === 'references') {
-        toolbar.hidden = legend.hidden = viewport.hidden = true; tree.hidden = false; status.textContent = message.title;
+        toolbar.hidden = legend.hidden = capabilityNote.hidden = viewport.hidden = true; tree.hidden = false; status.textContent = [message.title, ...(message.notices || [])].join('\n');
         tree.replaceChildren();
         for (const group of message.groups) {
             const file = element('details', 'reference-file'); file.open = true;
@@ -379,8 +408,8 @@ function exportJson() {
     if (!model) return;
     const visible = model.visible();
     const symbols = [...new Map(visible.map(node => [node.symbol.id, node.symbol])).values()];
-    const relations = [...new Map(visible.filter(node => node.relation).map(node => [JSON.stringify([node.relation!.callerId, node.relation!.calleeId]), node.relation])).values()];
-    post({ type: 'export', format: 'json', content: JSON.stringify({ version: 1, root: model.occurrences.get('root')!.symbol.id, symbols, relations }, null, 2) });
+    const relations = [...new Map(visible.filter(node => node.relation).map(node => [JSON.stringify([node.relation!.sourceId, node.relation!.targetId, node.relation!.kind]), node.relation])).values()];
+    post({ type: 'export', format: 'json', content: JSON.stringify({ version: 2, mode, root: model.occurrences.get('root')!.symbol.id, symbols, relations }, null, 2) });
 }
 function exportSvg() {
     if (!model || !layoutPositions.size) return;
@@ -390,7 +419,7 @@ function exportSvg() {
     const styledClone = (source: Element): Element => {
         const clone = source.cloneNode(false) as HTMLElement | SVGElement;
         const computed = getComputedStyle(source);
-        const properties = ['color', 'background-color', 'font-family', 'font-size', 'font-weight', 'line-height', 'display', 'align-items', 'justify-content', 'flex', 'flex-shrink', 'flex-wrap', 'gap', 'padding', 'margin', 'border', 'border-radius', 'width', 'max-width', 'min-width', 'height', 'max-height', 'overflow', 'overflow-wrap', 'white-space', 'text-align', 'text-overflow', 'fill', 'stroke', 'stroke-width', 'position', 'left', 'right', 'top', 'bottom', 'box-sizing', 'list-style', 'opacity'];
+        const properties = ['color', 'background-color', 'font-family', 'font-size', 'font-weight', 'line-height', 'display', 'align-items', 'justify-content', 'flex', 'flex-shrink', 'flex-wrap', 'gap', 'padding', 'margin', 'border', 'border-radius', 'width', 'max-width', 'min-width', 'height', 'max-height', 'overflow', 'overflow-wrap', 'white-space', 'text-align', 'text-overflow', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'position', 'left', 'right', 'top', 'bottom', 'box-sizing', 'list-style', 'opacity'];
         properties.forEach(property => clone.style.setProperty(property, computed.getPropertyValue(property)));
         source.childNodes.forEach(child => clone.append(child instanceof Element ? styledClone(child) : child.cloneNode(true)));
         return clone;

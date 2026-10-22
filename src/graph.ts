@@ -7,6 +7,8 @@ export interface Branch {
     error?: string;
     children: string[];
     visibleCount: number;
+    notices: string[];
+    supported: boolean;
 }
 export interface Occurrence {
     id: string;
@@ -18,7 +20,7 @@ export interface Occurrence {
     incoming: Branch;
     outgoing: Branch;
 }
-const branch = (): Branch => ({ state: 'idle', expanded: false, children: [], visibleCount: 20 });
+const branch = (): Branch => ({ state: 'idle', expanded: false, children: [], visibleCount: 20, notices: [], supported: true });
 
 // Semantic symbols may appear on several paths. Visibility belongs to a path,
 // while queries are cached by semantic identity in the extension host.
@@ -47,7 +49,7 @@ export class GraphModel {
         const state = this.occurrences.get(id)?.[direction];
         if (state) state.visibleCount += 20;
     }
-    accept(id: string, direction: Direction, requestId: number, relations: RelationData[]): boolean {
+    accept(id: string, direction: Direction, requestId: number, relations: RelationData[], notices: string[] = [], supported = true): boolean {
         const node = this.occurrences.get(id);
         if (!node || node[direction].requestId !== requestId || node[direction].state !== 'loading') return false;
         const state = node[direction];
@@ -63,6 +65,8 @@ export class GraphModel {
             return childId;
         });
         state.state = 'loaded';
+        state.notices = notices;
+        state.supported = supported;
         return true;
     }
     fail(id: string, direction: Direction, requestId: number, error: string) {

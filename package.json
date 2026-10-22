@@ -1,8 +1,8 @@
 {
   "name": "multi-windows-tool",
   "displayName": "Multi-Windows-Tool",
-  "description": "交互式双向代码调用关系查看器，支持跟随、锁定与调用点导航",
-  "version": "2.0.1",
+  "description": "紧凑的符号关系查看器：调用、引用、宏使用和结构体成员",
+  "version": "2.1.0",
   "publisher": "DoubleX",
   "repository": {
     "type": "git",
@@ -36,6 +36,10 @@
       {
         "command": "multiRef.restore",
         "title": "%multiRef.restore.title%"
+      },
+      {
+        "command": "multiRef.diagnostics",
+        "title": "%multiRef.diagnostics.title%"
       }
     ],
     "menus": {
@@ -48,7 +52,7 @@
         {
           "command": "multiRef.callHierarchy",
           "group": "navigation@2",
-          "when": "editorHasCallHierarchyProvider"
+          "when": "editorHasCallHierarchyProvider || editorHasReferenceProvider"
         }
       ]
     },

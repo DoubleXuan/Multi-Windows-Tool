@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { GraphModel, AsyncCache } = require('../out/graph');
 const symbol = id => ({ id, name: id, detail: `${id}.cpp`, uri: `file:///${id}.cpp`, range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } } });
-const relation = (id, parent = 'root') => ({ symbol: symbol(id), callerId: id, calleeId: parent, sites: [] });
+const relation = (id, parent = 'root') => ({ symbol: symbol(id), sourceId: id, targetId: parent, kind: 'calls', sources: ['callHierarchy'], sites: [] });
 
 test('incoming and outgoing branches have independent request and visibility state', () => {
     const graph = new GraphModel(symbol('root'));
